@@ -1,5 +1,5 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import matplotlib
 import copy
@@ -7,8 +7,6 @@ import matplotlib.pyplot as plt
 
 
 import os
-# Set DISPLAY to :0
-# Set the DISPLAY environment variable
 os.environ['DISPLAY'] = '$(awk \'/nameserver / {print $2; exit}\' /etc/resolv.conf 2>/dev/null):0'
 
 # Use the Agg backend for Matplotlib
@@ -40,10 +38,10 @@ class SanitizerWorld(gym.Env):
       self.sum_sanitized = 0
 
       # Gen random starting pose in the map  
-      self.start_pos   = np.array((np.random.randint(0, self.grid_size[0]-1), 
+      self.current_pos = np.array((np.random.randint(0, self.grid_size[0]-1), 
                                    np.random.randint(0, self.grid_size[1]-1)))
-      self.current_pos = self.start_pos
-      self.new_pos     = self.start_pos
+      self.start_pos = None
+      self.new_pos   = None
 
       # Define action and observation space
       self.action_space = spaces.Discrete(4+1)  # Up, Down, Left, Right, DoNothing
@@ -67,10 +65,11 @@ class SanitizerWorld(gym.Env):
          self.fig.savefig('demo.png', bbox_inches='tight')
 
 
-   def reset(self):
+   def reset(self, seed=42):
       """
       Reset the environment to the initial state.
       """
+      super().reset(seed=seed)
       self.start_pos   = np.array((np.random.randint(0, self.grid_size[0]), 
                                    np.random.randint(0, self.grid_size[1])))
       self.current_pos = self.start_pos
@@ -95,25 +94,25 @@ class SanitizerWorld(gym.Env):
       - info (dict): Additional information.
       """
       # Update position based on action
-      self.start_pos = copy.deepcopy(self.current_pos)
-      self.new_pos   = self._get_new_position(action)
-      
+      self.start_pos = self.current_pos
+      possible_new_pos = self._get_new_position(action)
+
       # Check if the new position is valid
-      if self._is_valid_position(self.new_pos):
-         self.current_pos = self.new_pos
-      else:
-         self.current_pos = self.start_pos
+      if self._is_valid_position(possible_new_pos):
+         self.new_pos = copy.deepcopy(possible_new_pos)
+         self.current_pos = copy.deepcopy(self.new_pos)
       
       self.sanitized[self.start_pos[0], self.start_pos[1]] = 1
 
       done   = self._get_done()
       obs    = self._get_observation()
       reward = self._get_reward()
+      truncated = False
 
       # Info is an empty dict for now, you can use to pass additional information for example for logging
       info = {}
 
-      return obs, reward, done, info
+      return obs, reward, done, truncated, info
 
 
    def _generate_obstacles(self):
@@ -151,7 +150,7 @@ class SanitizerWorld(gym.Env):
       # Agent perform wrong movement ...
 
       # Return randomly true or false
-      if np.random.random_sample() > 0.99:
+      if np.random.random_sample() > 0.98:
          return True
       elif (self.grid_size[0]*self.grid_size[1] - np.sum(self.obstacles)) == self.sum_sanitized:
          return True
@@ -181,7 +180,9 @@ class SanitizerWorld(gym.Env):
       reward = 0
       if np.sum(self.sanitized) > self.sum_sanitized:
          reward = 1
-         
+      self.sum_sanitized = np.sum(self.sanitized)
+      if self.new_pos[0] == self.start_pos[0] and self.new_pos[1] == self.start_pos[1]:
+         reward = -10
       return reward
 
    def _get_new_position(self, action):
@@ -190,8 +191,8 @@ class SanitizerWorld(gym.Env):
       """
       # Considering the action as a movement in the grid
       # TODO: (Additional) Implement the logic to more complex movements (e.g. diagonal)
-
-      new_pos = self.current_pos
+      new_pos = copy.deepcopy(self.current_pos)
+ 
       if action == 1:  # Up
          new_pos[0] -= 1
       elif action == 3:  # Down
@@ -200,27 +201,25 @@ class SanitizerWorld(gym.Env):
          new_pos[1] -= 1
       elif action == 4:  # Right
          new_pos[1] += 1
-      elif action == 0: # do nothing
+      elif action == 0:  # DoNothing 
          pass
-
-      # TODO: Control if the agent it's hitting an obstacle, if so, don't move
-      # if not self._is_valid_position(new_pos):
-      #   new_pos = self.current_pos
+      
+      new_pos[0] = np.clip(new_pos[0], 0, self.grid_size[0] - 1)
+      new_pos[1] = np.clip(new_pos[1], 0, self.grid_size[1] - 1)
 
       return new_pos
-
 
    def _is_valid_position(self, pos):
       """
       Check if the given position is valid (not an obstacle and within bounds).
       """
       if pos[0] < 0 or pos[0] >= self.grid_size[0] or pos[1] < 0 or pos[1] >= self.grid_size[1]:
+         print('Out of bounds')
          return False
       elif self.obstacles[pos[0], pos[1]] == 1:
          return False
       else:
          return True
-
 
    def update_render_data(self):
       matrix = np.ones((self.map.shape[0], self.map.shape[1], 3)) * 0.9
