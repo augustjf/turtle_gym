@@ -37,6 +37,8 @@ class SanitizerWorld(gym.Env):
       self.sanitized    = np.zeros_like(self.map)
       self.sum_sanitized = 0
       self.reward_threshold = 100
+      self.time_step = 1
+      self.san_thresh = 10*1e-3
 
       # Gen random starting pose in the map  
       self.current_pos = np.array((np.random.randint(0, self.grid_size[0]-1), 
@@ -49,10 +51,11 @@ class SanitizerWorld(gym.Env):
       # TODO: Define observation space
       # observation and action may vary depends on how we define the problem
       # observation is a key part of the problem definition because it defines the network as well
-      self.observation_space = Dict(
-         {"position" : MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
-          "sanitized": MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
-         })                            
+      self.observation_space = MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1]))
+      # self.observation_space = Dict(
+      #    {"position" : MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
+      #     "sanitized": MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
+      #    })                            
       # Initialize the rendering if needed
       if self.render_available:
          self.fig, self.ax = plt.subplots()
@@ -84,18 +87,6 @@ class SanitizerWorld(gym.Env):
       return obs
 
    def step(self, action):
-      """
-      Take a step in the environment based on the given action.
-
-      Parameters:
-      - action (int): The action to take (0: Up, 1: Down, 2: Left, 3: Right).
-
-      Returns:
-      - observation: Agent's observation of the current environment.
-      - reward (float): Amount of reward returned after the step.
-      - done (bool): Whether the episode has ended.
-      - info (dict): Additional information.
-      """
       # Update position based on action
       self.start_pos = self.current_pos
       possible_new_pos = self._get_new_position(action)
@@ -105,14 +96,13 @@ class SanitizerWorld(gym.Env):
          self.new_pos = copy.deepcopy(possible_new_pos)
          self.current_pos = copy.deepcopy(self.new_pos)
       
-      self.sanitized[self.start_pos[0], self.start_pos[1]] = 1
+      self.sanitized[self.energy_level > self.san_thresh] = 1
 
       done   = self._get_done()
       obs    = self._get_observation()
       reward = self._get_reward()
       truncated = False
 
-      # Info is an empty dict for now, you can use to pass additional information for example for logging
       info = {}
 
       return obs, reward, done, truncated, info
@@ -134,10 +124,15 @@ class SanitizerWorld(gym.Env):
       Update the energy level based on the current position.
       """
       # TODO: Implement the logic to update the energy level
-      new_energy_level = self.energy_level
-      new_energy_level = new_energy_level + np.zeros_like(new_energy_level)
-
-      return new_energy_level
+      P = 100*1e-6
+      new_energy_level = np.zeros_like(self.energy_level)
+      for i in range(self.grid_size[0]):
+         for j in range(self.grid_size[1]):
+            E = P*self.time_step / ((i-self.current_pos[0])**2 + (j-self.current_pos[1])**2)
+            new_energy_level[i,j] = E
+      
+      self.energy_level = self.energy_level + new_energy_level
+      
 
    def _get_done(self):
       """
