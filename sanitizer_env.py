@@ -1,9 +1,10 @@
 import gymnasium as gym
-from gymnasium import spaces
+from gymnasium.spaces import MultiDiscrete, Dict, Discrete
 import numpy as np
 import matplotlib
 import copy
 import matplotlib.pyplot as plt
+import time
 
 
 import os
@@ -25,7 +26,6 @@ class SanitizerWorld(gym.Env):
       self.seed = seed
       self.render_available = render_available
       self.grid_size = grid_size
-      ...
 
       # Set seed
       np.random.seed(seed)
@@ -36,6 +36,7 @@ class SanitizerWorld(gym.Env):
       self.energy_level = np.zeros_like(self.map)
       self.sanitized    = np.zeros_like(self.map)
       self.sum_sanitized = 0
+      self.reward_threshold = 100
 
       # Gen random starting pose in the map  
       self.current_pos = np.array((np.random.randint(0, self.grid_size[0]-1), 
@@ -44,12 +45,14 @@ class SanitizerWorld(gym.Env):
       self.new_pos   = None
 
       # Define action and observation space
-      self.action_space = spaces.Discrete(4+1)  # Up, Down, Left, Right, DoNothing
+      self.action_space = Discrete(4+1)  # Up, Down, Left, Right, DoNothing
       # TODO: Define observation space
       # observation and action may vary depends on how we define the problem
       # observation is a key part of the problem definition because it defines the network as well
-      self.observation_space = spaces.MultiDiscrete([grid_size[0]-1, grid_size[1]-1])
-      
+      self.observation_space = Dict(
+         {"position" : MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
+          "sanitized": MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
+         })                            
       # Initialize the rendering if needed
       if self.render_available:
          self.fig, self.ax = plt.subplots()
@@ -150,7 +153,7 @@ class SanitizerWorld(gym.Env):
       # Agent perform wrong movement ...
 
       # Return randomly true or false
-      if np.random.random_sample() > 0.98:
+      if np.random.random_sample() > 0.99:
          return True
       elif (self.grid_size[0]*self.grid_size[1] - np.sum(self.obstacles)) == self.sum_sanitized:
          return True
@@ -182,7 +185,7 @@ class SanitizerWorld(gym.Env):
          reward = 1
       self.sum_sanitized = np.sum(self.sanitized)
       if self.new_pos[0] == self.start_pos[0] and self.new_pos[1] == self.start_pos[1]:
-         reward = -10
+         reward = -1
       return reward
 
    def _get_new_position(self, action):
@@ -263,3 +266,4 @@ class SanitizerWorld(gym.Env):
 
       #plt.pause(0.1)
       self.fig.savefig('demo.png', bbox_inches='tight')
+      time.sleep(0.1)
