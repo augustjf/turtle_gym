@@ -1,6 +1,5 @@
 import numpy as np
 import math
-import random
 from collections import namedtuple, deque
 
 import torch
@@ -8,11 +7,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
+from gymnasium.wrappers import FlattenObservation
+from gymnasium.spaces.utils import flatten
 
 import sanitizer_env
 
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(device)
 
 class DQN(nn.Module):
     def __init__(self, n_obs, n_action):
@@ -46,12 +49,13 @@ class Learner():
         self.EPS_DECAY = 1000
         self.TAU = 0.005
         self.LR = 1e-5
-        self.NUM_EPISODES = 5000
+        self.NUM_EPISODES = 10000
         self.NUM_STEPS = 1000
         self.LOG_INTERVAL = 10  
         self.EPS = np.finfo(np.float32).eps.item()
         self.PATH = 'dqn_sanitizer.pth'
 
+        #self.env = FlattenObservation(sanitizer_env.SanitizerWorld())
         self.env = sanitizer_env.SanitizerWorld()
         self.n_obs = self.env.observation_space.shape[0]
         self.n_action = self.env.action_space.n
@@ -91,15 +95,14 @@ class Learner():
         del self.dqn.saved_log_probs[:]
 
     def train(self):
-        env = sanitizer_env.SanitizerWorld()
-        env.reset()
+        self.env.reset()
         running_reward = 10
         for n in range(self.NUM_EPISODES):
-            obs = env.reset()
+            obs = self.env.reset()
             ep_reward = 0
             for t in range(self.NUM_STEPS):
                 action = self.select_action(obs)
-                obs, reward, done, _, _ = env.step(action)
+                obs, reward, done, _, _ = self.env.step(action)
                 self.dqn.rewards.append(reward)
                 ep_reward += reward
                 if done:
@@ -112,7 +115,7 @@ class Learner():
                 print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
                     n, ep_reward, running_reward))
             
-            if running_reward > env.reward_threshold:
+            if running_reward > self.env.reward_threshold:
                 print(f"Reward exced the threhsold! Running reward is now {running_reward}, last episode duration: {t} time steps!")
                 break
         torch.save(self.dqn.state_dict(), self.PATH)
@@ -141,7 +144,7 @@ class Learner():
 
 def main():
     learner = Learner()
-    #learner.train()
+    learner.train()
     learner.test()
 
 main()

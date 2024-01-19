@@ -26,6 +26,7 @@ class SanitizerWorld(gym.Env):
       self.seed = seed
       self.render_available = render_available
       self.grid_size = grid_size
+      self.cell_size = 0.2
 
       # Set seed
       np.random.seed(seed)
@@ -35,16 +36,18 @@ class SanitizerWorld(gym.Env):
       self.obstacles    = np.zeros_like(self.map)
       self.energy_level = np.zeros_like(self.map)
       self.sanitized    = np.zeros_like(self.map)
-      self.sum_sanitized = 0
-      self.reward_threshold = 100
-      self.time_step = 1
-      self.san_thresh = 10*1e-3
+      self.sum_sanitized      = 0
+      self.reward_threshold   = 100
+      self.time_step          = 15
+      self.san_thresh         = 10*1e-3
 
       # Gen random starting pose in the map  
       self.current_pos = np.array((np.random.randint(0, self.grid_size[0]-1), 
                                    np.random.randint(0, self.grid_size[1]-1)))
-      self.start_pos = None
-      self.new_pos   = None
+      self.start_pos       = None
+      self.new_pos         = None
+      self.prev_direction  = None
+      self.direction       = None
 
       # Define action and observation space
       self.action_space = Discrete(4+1)  # Up, Down, Left, Right, DoNothing
@@ -53,9 +56,10 @@ class SanitizerWorld(gym.Env):
       # observation is a key part of the problem definition because it defines the network as well
       self.observation_space = MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1]))
       # self.observation_space = Dict(
-      #    {"position" : MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
-      #     "sanitized": MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
-      #    })                            
+      #    {
+      #       "position" : MultiDiscrete(np.array([grid_size[0]-1, grid_size[1]-1])),
+      #       "sanitized": MultiDiscrete(np.ones_like(self.map))
+      #    })
       # Initialize the rendering if needed
       if self.render_available:
          self.fig, self.ax = plt.subplots()
@@ -71,17 +75,18 @@ class SanitizerWorld(gym.Env):
          self.fig.savefig('demo.png', bbox_inches='tight')
 
 
-   def reset(self, seed=42):
+   def reset(self, seed=42, options=None):
       """
       Reset the environment to the initial state.
       """
-      super().reset(seed=seed)
+      super().reset(seed=seed, options=options)
       self.start_pos   = np.array((np.random.randint(0, self.grid_size[0]), 
                                    np.random.randint(0, self.grid_size[1])))
       self.current_pos = self.start_pos
       self.new_pos = self.current_pos
       self.obstacles = self._generate_obstacles()
       self.sanitized = np.zeros_like(self.map)
+      self.sum_sanitized = 0
       self.energy_level = np.zeros_like(self.map)
       obs = self._get_observation()
       return obs
@@ -89,13 +94,15 @@ class SanitizerWorld(gym.Env):
    def step(self, action):
       # Update position based on action
       self.start_pos = self.current_pos
+      self.prev_direction = self.direction
       possible_new_pos = self._get_new_position(action)
 
       # Check if the new position is valid
       if self._is_valid_position(possible_new_pos):
          self.new_pos = copy.deepcopy(possible_new_pos)
          self.current_pos = copy.deepcopy(self.new_pos)
-      
+         self.direction = action
+      self._update_energy_level()
       self.sanitized[self.energy_level > self.san_thresh] = 1
 
       done   = self._get_done()
@@ -107,7 +114,6 @@ class SanitizerWorld(gym.Env):
 
       return obs, reward, done, truncated, info
 
-
    def _generate_obstacles(self):
 
       obstacles = np.zeros_like(self.map)
@@ -115,7 +121,13 @@ class SanitizerWorld(gym.Env):
       # Generate random obstacles
       # if random p > 0.05, then obstacle
       # TODO: (Additional) Implement the logic to more complex obstacles (e.g. walls)
-      obstacles[np.random.random_sample(obstacles.shape) > 0.95] = 1
+      #obstacles[np.random.random_sample(obstacles.shape) > 0.95] = 1
+      for i in range(self.grid_size[0]):
+         obstacles[i,0] = 1
+         obstacles[i,-1] = 1
+      for i in range(self.grid_size[1]):
+         obstacles[0,i] = 1
+         obstacles[-1,i] = 1
 
       return obstacles
 
@@ -128,8 +140,11 @@ class SanitizerWorld(gym.Env):
       new_energy_level = np.zeros_like(self.energy_level)
       for i in range(self.grid_size[0]):
          for j in range(self.grid_size[1]):
-            E = P*self.time_step / ((i-self.current_pos[0])**2 + (j-self.current_pos[1])**2)
-            new_energy_level[i,j] = E
+            if i == self.current_pos[0] and j == self.current_pos[1]:
+               continue
+            else:
+               E = P*self.time_step / (self.cell_size*((i-self.current_pos[0])**2 + (j-self.current_pos[1])**2))
+               new_energy_level[i,j] = E
       
       self.energy_level = self.energy_level + new_energy_level
       
@@ -148,7 +163,7 @@ class SanitizerWorld(gym.Env):
       # Agent perform wrong movement ...
 
       # Return randomly true or false
-      if np.random.random_sample() > 0.99:
+      if np.random.random_sample() > 0.98:
          return True
       elif (self.grid_size[0]*self.grid_size[1] - np.sum(self.obstacles)) == self.sum_sanitized:
          return True
@@ -164,6 +179,10 @@ class SanitizerWorld(gym.Env):
       # Observation defined the network input, so it's critical to define it properly
       # The observation should contain all the information the agent needs to make a decision
       # unnecessary information can be removed to reduce the network complexity
+      # obs = {}
+      # obs['position'] = self.current_pos
+      # obs['sanitized'] = self.sanitized
+
       return self.current_pos
 
    def _get_reward(self):
@@ -175,12 +194,14 @@ class SanitizerWorld(gym.Env):
       # Reward is the signal that the network is trying to maximize
       # Reward is a combination of positive and negative (penalizing) signals
       
-      reward = 0
-      if np.sum(self.sanitized) > self.sum_sanitized:
-         reward = 1
+      reward = np.sum(self.sanitized) - self.sum_sanitized #Num of new sanitized pixels
       self.sum_sanitized = np.sum(self.sanitized)
+      reward -= 1 #Penalty for each step
+      if self.prev_direction == self.direction:
+         reward += 1 #Reward for moving in the same direction
+
       if self.new_pos[0] == self.start_pos[0] and self.new_pos[1] == self.start_pos[1]:
-         reward = -1
+         reward = -5
       return reward
 
    def _get_new_position(self, action):
@@ -226,7 +247,10 @@ class SanitizerWorld(gym.Env):
       matrix[np.where(self.obstacles == 1)] = [0, 0, 0]  # Example: Setting the top-left element to red
 
       # Make sanitized pixels green
-      matrix[np.where(self.sanitized == 1)] = [0, 1, 0]
+      san_mat = np.zeros_like(self.map)
+      san_mat[np.where(self.sanitized == 1)] = 1
+      san_mat[np.where(self.obstacles == 1)] = 0
+      matrix[np.where(san_mat == 1)] = [0, 1, 0]
 
       # Make starting position element blue
       matrix[self.start_pos[0], self.start_pos[1]] = [0, 0, 1]
