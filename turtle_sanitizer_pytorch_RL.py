@@ -13,7 +13,6 @@ from gymnasium.spaces.utils import flatten
 import sanitizer_env
 
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
-
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(device)
 
@@ -30,6 +29,7 @@ class DQN(nn.Module):
 
     def forward(self, x):
         # Goes through the network and returns the action to take
+        x = x.to(device)
         x = self.l1(x)
         x = self.dropout(x)
         x = F.relu(x)
@@ -42,6 +42,7 @@ class DQN(nn.Module):
     
 class Learner():
     def __init__(self):
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.BATCH_SIZE = 128
         self.GAMMA = 0.99
         self.EPS_START = 0.9
@@ -49,7 +50,7 @@ class Learner():
         self.EPS_DECAY = 1000
         self.TAU = 0.005
         self.LR = 1e-5
-        self.NUM_EPISODES = 10000
+        self.NUM_EPISODES = 1000
         self.NUM_STEPS = 1000
         self.LOG_INTERVAL = 10  
         self.EPS = np.finfo(np.float32).eps.item()
@@ -60,11 +61,13 @@ class Learner():
         self.n_obs = self.env.observation_space.shape[0]
         self.n_action = self.env.action_space.n
         self.dqn = DQN(self.n_obs, self.n_action)
+        self.dqn.to(torch.device(device))
         self.optimizer = optim.Adam(self.dqn.parameters(), lr=self.LR)
         
 
     def select_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
+        state.to(self.device)
         probs = self.dqn(state)
         m = Categorical(probs)
         action = m.sample()
@@ -80,6 +83,7 @@ class Learner():
             returns.appendleft(R)
 
         returns = torch.tensor(returns)
+        returns.to(self.device)
         returns = (returns - returns.mean()) / (returns.std() + self.EPS)
         
         for log_prob, R in zip(self.dqn.saved_log_probs, returns):
@@ -88,7 +92,8 @@ class Learner():
             else:
                 policy_loss.append(log_prob * R)
         self.optimizer.zero_grad()
-        policy_loss = -torch.cat(policy_loss).sum()   
+        policy_loss = -torch.cat(policy_loss).sum() 
+        policy_loss.to(self.device)  
         policy_loss.backward()
         self.optimizer.step()
         del self.dqn.rewards[:]
@@ -118,15 +123,17 @@ class Learner():
             if running_reward > self.env.reward_threshold:
                 print(f"Reward exced the threhsold! Running reward is now {running_reward}, last episode duration: {t} time steps!")
                 break
-        torch.save(self.dqn.state_dict(), self.PATH)
+        torch.save(self.dqn, self.PATH)
 
 
     def test(self):     
         total_reward = 0
         num_eval_episodes = 10
-        model = DQN(self.n_obs, self.n_action)
-        model.load_state_dict(torch.load(self.PATH))
-        model.eval()
+        self.dqn = DQN(self.n_obs, self.n_action)
+        self.dqn.to(torch.device(device))
+        #self.dqn.load_state_dict(torch.load(self.PATH))
+        self.qdn = torch.load(self.PATH)
+        self.dqn.eval()
 
         input('Enter to start testing....')
         
@@ -144,7 +151,7 @@ class Learner():
 
 def main():
     learner = Learner()
-    learner.train()
+    #learner.train()
     learner.test()
 
 main()

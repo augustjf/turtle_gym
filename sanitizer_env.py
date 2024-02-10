@@ -7,12 +7,7 @@ import matplotlib.pyplot as plt
 import time
 
 
-import os
-os.environ['DISPLAY'] = '$(awk \'/nameserver / {print $2; exit}\' /etc/resolv.conf 2>/dev/null):0'
-
-# Use the Agg backend for Matplotlib
 matplotlib.use('Agg')
-
 
 class SanitizerWorld(gym.Env):
    def __init__(self, grid_size=[20, 30], 
@@ -37,7 +32,7 @@ class SanitizerWorld(gym.Env):
       self.energy_level = np.zeros_like(self.map)
       self.sanitized    = np.zeros_like(self.map)
       self.sum_sanitized      = 0
-      self.reward_threshold   = 100
+      self.reward_threshold   = 2000
       self.time_step          = 15
       self.san_thresh         = 10*1e-3
 
@@ -101,7 +96,8 @@ class SanitizerWorld(gym.Env):
       if self._is_valid_position(possible_new_pos):
          self.new_pos = copy.deepcopy(possible_new_pos)
          self.current_pos = copy.deepcopy(self.new_pos)
-         self.direction = action
+         if action != 0:
+            self.direction = action
       self._update_energy_level()
       self.sanitized[self.energy_level > self.san_thresh] = 1
 
@@ -163,9 +159,13 @@ class SanitizerWorld(gym.Env):
       # Agent perform wrong movement ...
 
       # Return randomly true or false
-      if np.random.random_sample() > 0.98:
-         return True
-      elif (self.grid_size[0]*self.grid_size[1] - np.sum(self.obstacles)) == self.sum_sanitized:
+      # if np.random.random_sample() > 0.99:
+      #    return True
+      print(self.sum_sanitized)
+      print(self.grid_size[0]*self.grid_size[1])
+      print(np.sum(self.obstacles))
+      print('\n')
+      if (self.grid_size[0]*self.grid_size[1] - np.sum(self.obstacles)) == self.sum_sanitized:
          return True
       else:
          return False
@@ -194,14 +194,15 @@ class SanitizerWorld(gym.Env):
       # Reward is the signal that the network is trying to maximize
       # Reward is a combination of positive and negative (penalizing) signals
       
-      reward = np.sum(self.sanitized) - self.sum_sanitized #Num of new sanitized pixels
+      reward = (np.sum(self.sanitized) - self.sum_sanitized)**2 #Num of new sanitized pixels
       self.sum_sanitized = np.sum(self.sanitized)
-      reward -= 1 #Penalty for each step
+      reward -= 2 #Penalty for each step
       if self.prev_direction == self.direction:
-         reward += 1 #Reward for moving in the same direction
+         reward += 10 #Reward for moving in the same direction
 
       if self.new_pos[0] == self.start_pos[0] and self.new_pos[1] == self.start_pos[1]:
-         reward = -5
+         reward -= 10 #Penalty for not moving
+ 
       return reward
 
    def _get_new_position(self, action):
