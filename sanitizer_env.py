@@ -38,7 +38,6 @@ class SanitizerWorld(gym.Env):
       # Gen random starting pose in the map  
       self.current_pos = np.array((np.random.randint(1, self.grid_size[0]-1), 
                                    np.random.randint(1, self.grid_size[1]-1)))
-      self.current_pos = np.array([1,1])
       
       self.start_pos       = None
       self.new_pos         = None
@@ -71,7 +70,6 @@ class SanitizerWorld(gym.Env):
       super().reset(seed=seed, options=options)
       self.start_pos   = np.array((np.random.randint(1, self.grid_size[0]-1), 
                                    np.random.randint(1, self.grid_size[1]-1)))
-      self.start_pos = np.array([1,1])
    
       self.current_pos = self.start_pos
       self.new_pos = self.current_pos
@@ -252,7 +250,6 @@ class SanitizerWorld(gym.Env):
       # Redraw the plot
       self.fig.canvas.draw()
    
-      #plt.pause(0.1)
       self.fig.savefig('demo.png', bbox_inches='tight')
       time.sleep(0.1)
 
